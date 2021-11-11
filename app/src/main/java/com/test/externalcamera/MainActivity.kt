@@ -2,17 +2,27 @@ package com.test.externalcamera
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraMetadata
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
+import androidx.camera.camera2.interop.Camera2CameraFilter
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.core.CameraFilter
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import kotlinx.android.synthetic.main.activity_main.*
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val TAG = "MainActivity"
+        private const val TAG = "ExternalCamera"
         private const val REQUEST_CODE_PERMISSIONS = 10
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
     }
@@ -57,5 +67,51 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startCamera() {}
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener(Runnable {
+            // Used to bind the lifecycle of cameras to the lifecycle owner
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            // Preview
+            val preview = Preview.Builder()
+                .build()
+                .also {
+                    it.setSurfaceProvider(viewFinder.surfaceProvider)
+                }
+
+            // Select camera. Nougat에서 확인했을 때, Cam이 External이 아니고 Front로 올라오는 것을 확인.
+            val cameraSelector = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.N) {
+                CameraSelector.DEFAULT_FRONT_CAMERA
+            } else {
+                val cameraFilter = getExternalCameraFilter()
+                CameraSelector.Builder().addCameraFilter(cameraFilter).build()
+            }
+
+            try {
+                // Unbind use cases before rebinding
+                cameraProvider.unbindAll()
+
+                // Bind use cases to camera
+                cameraProvider.bindToLifecycle(
+                    this, cameraSelector, preview)
+
+            } catch(exc: Exception) {
+                Log.e(TAG, "Use case binding failed", exc)
+            }
+
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun getExternalCameraFilter():
+            CameraFilter = Camera2CameraFilter.createCameraFilter { cameraInfos: List<Camera2CameraInfo> ->
+        val resultList = mutableListOf<Camera2CameraInfo>()
+        for (cameraInfo in cameraInfos) {
+            if (cameraInfo.getCameraCharacteristic(CameraCharacteristics.LENS_FACING)?.equals(CameraMetadata.LENS_FACING_EXTERNAL) == true) {
+                resultList.add(cameraInfo)
+            }
+        }
+        resultList
+    }
 }
