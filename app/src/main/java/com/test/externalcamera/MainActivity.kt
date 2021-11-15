@@ -13,13 +13,21 @@ import androidx.camera.camera2.interop.Camera2CameraFilter
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.CameraFilter
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlinx.android.synthetic.main.activity_main.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var faceAnalyzer: FaceAnalyzer
+    private lateinit var cameraExecutor: ExecutorService
 
     companion object {
         private const val TAG = "ExternalCamera"
@@ -47,6 +55,13 @@ class MainActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
+
+        cameraExecutor = Executors.newSingleThreadExecutor()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
     }
 
     private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
@@ -89,13 +104,36 @@ class MainActivity : AppCompatActivity() {
                 CameraSelector.Builder().addCameraFilter(cameraFilter).build()
             }
 
+            // High-accuracy landmark detection and face classification
+            val highAccuracyOpts = FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
+                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL)
+                .build()
+
+            // Real-time contour detection
+            val realTimeOpts = FaceDetectorOptions.Builder()
+                .setContourMode(FaceDetectorOptions.CONTOUR_MODE_ALL)
+                .build()
+
+            val defaultOpts = FaceDetectorOptions.Builder().setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL).build()
+            val detector = FaceDetection.getClient(defaultOpts)
+
+            val faceAnalysis = ImageAnalysis.Builder()
+                .build()
+                .also {
+                    faceAnalyzer = FaceAnalyzer(detector, graphic_overlay, cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA)
+                    it.setAnalyzer(cameraExecutor, faceAnalyzer)
+                }
+
             try {
                 // Unbind use cases before rebinding
                 cameraProvider.unbindAll()
 
                 // Bind use cases to camera
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview)
+                    this, cameraSelector, preview, faceAnalysis)
 
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
